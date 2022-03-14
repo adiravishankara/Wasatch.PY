@@ -388,7 +388,9 @@ class SpectrometerSettings(object):
         return self.is_arm() and \
                ( self.is_imx() or \
                  "micro" in self.full_model().lower() or \
-                 "sig"   in self.full_model().lower() )
+                 "sig"   in self.full_model().lower() 
+                 ) or \
+                 "andor" in self.full_model().lower()
 
     def is_non_raman(self):
         return not self.has_excitation()
