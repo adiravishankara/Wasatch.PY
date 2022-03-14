@@ -132,7 +132,14 @@ class AndorDevice:
         f = {}
         f["integration_time_ms"] = lambda x: self.set_integration_time_ms(x) # conversion from millisec to microsec
         f["shutter_enable"] = lambda x: self.set_shutter_enable(bool(x))
+        f["detector_gain"] = lambda x: self.set_detector_gain(int(x))
         self.lambdas = f
+
+    def set_detector_gain(x):
+        self.detector_gain = x
+        gain = c_int(self.detector_gain)
+        assert(self.SUCCESS == self.driver.SetMCPGain(gain)), "unable to set detector gain"
+        log.debug(f"success setting detector gain to value {self.detector_gain}")
 
     def acquire_data(self):
         reading = self.take_one_averaged_reading()
@@ -278,7 +285,7 @@ class AndorDevice:
 
     def get_serial_number(self):
         sn = c_int()
-        assert(self.SUCCESS == cdll.atmcd32d.GetCameraSerialNumber(byref(sn))), "can't get serial number"
+        assert(self.SUCCESS == self.driver.GetCameraSerialNumber(byref(sn))), "can't get serial number"
         self.serial = f"CCD-{sn.value}"
         self.settings.eeprom.serial_number = self.serial
         log.debug(f"connected to {self.serial}")
