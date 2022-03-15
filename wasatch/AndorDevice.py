@@ -39,6 +39,7 @@ class AndorDevice:
 
         self.settings = SpectrometerSettings(self.device_id)
         self.summed_spectra         = None
+        self.update_gain            = False
         self.sum_count              = 0
         self.session_reading_count  = 0
         self.take_one               = False
@@ -141,14 +142,20 @@ class AndorDevice:
         f["shutter_enable"]                     = lambda x: self.set_shutter_enable(bool(x))
         f["detector_tec_enable"]                = lambda x: self.toggle_tec(bool(x))
         f["detector_tec_setpoint_degC"]         = lambda x: self.set_tec_setpoint(int(round(x)))
-        f["detector_gain"]                      = lambda x: self.set_detector_gain(int(x))
+        f["detector_gain"]                      = lambda x: self.flag_detector_gain(int(round(x)))
         self.lambdas = f
 
-    def set_detector_gain(self, x):
+    def flag_detector_gain(self, x):
         self.detector_gain = x
-        gain = c_int(self.detector_gain)
-        assert(self.SUCCESS == self.driver.SetMCPGain(gain)), "unable to set detector gain"
-        log.debug(f"success setting detector gain to value {self.detector_gain}")
+        self.update_gain = True
+
+
+    def set_detector_gain(self):
+        gain_low = c_int(self.detector_gain)
+        gain_high = c_int()
+        res = self.driver.GetMCPGain(byref(gain_low)) 
+        assert(self.SUCCESS == res), f"unable to set detector gain, got value of {res}"
+        log.debug(f"got detector gain range of {gain_low} to {gain_high}")
 
     def acquire_data(self):
         reading = self.take_one_averaged_reading()
@@ -187,14 +194,6 @@ class AndorDevice:
             # NOTE: reading.timestamp is when reading STARTED, not FINISHED!
             reading = Reading(self.device_id)
 
-            if self.settings.eeprom.has_cooling and self.toggle_state:
-                c_temp = c_int()
-                result = self.driver.GetTemperature(0,c_temp)
-                if (self.SUCCESS != result):
-                    log.error(f"unable to read tec temp, result was {result}")
-                else:
-                    log.debug(f"andor read temperature, value of {c_temp.value}")
-                    reading.detector_temperature_degC = c_temp.value
             try:
                 reading.integration_time_ms = self.settings.state.integration_time_ms
                 reading.laser_power_perc    = self.settings.state.laser_power_perc
@@ -203,7 +202,15 @@ class AndorDevice:
                 reading.spectrum            = self.get_spectrum_raw()
 
                 temperature = c_float()
-                temp_success = self.driver.GetTemperatureF(byref(temperature))
+                if self.settings.eeprom.has_cooling and self.toggle_state:
+                    temp_success = self.driver.GetTemperatureF(byref(temperature))
+                    if (self.SUCCESS != temp_success):
+                        log.error(f"unable to read tec temp, result was {temp_success}")
+                    else:
+                        log.debug(f"andor read temperature, value of {temperature.value}")
+
+                if self.update_gain:
+                    self.set_detector_gain()
 
                 reading.detector_temperature_degC = temperature.value
             except usb.USBError:
@@ -379,6 +386,9 @@ class AndorDevice:
         log.debug(f"set AD channel {ADnumber} with horizontal speed {HSnumber} ({STemp})")
 
     def change_setting(self,setting,value):
+        if not self.connected:
+            log.info("Connection not done, not changing settings")
+            return
         if setting == "scans_to_average":
             self.sum_count = 0
             self.settings.state.scans_to_average = int(value)
