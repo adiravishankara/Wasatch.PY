@@ -125,6 +125,7 @@ class AndorDevice:
         log.debug("set shutter to fully automatic external with internal always open")
 
         self.set_integration_time_ms(10)
+        self.obtain_gain_info()
         self.connected = True
         self.settings.eeprom.active_pixels_horizontal = self.pixels 
         return True
@@ -142,20 +143,22 @@ class AndorDevice:
         f["shutter_enable"]                     = lambda x: self.set_shutter_enable(bool(x))
         f["detector_tec_enable"]                = lambda x: self.toggle_tec(bool(x))
         f["detector_tec_setpoint_degC"]         = lambda x: self.set_tec_setpoint(int(round(x)))
-        f["detector_gain"]                      = lambda x: self.flag_detector_gain(int(round(x)))
+        f["detector_gain"]                      = lambda x: self.set_detector_gain(x)
         self.lambdas = f
 
-    def flag_detector_gain(self, x):
-        self.detector_gain = x
-        self.update_gain = True
+    def set_detector_gain(self, gain_value):
+        # iterate through gain options that are sorted high...low
+        # once we encounter an index the gain is greater than, then
+        # set to that gain, idea being set to closest gain floor
+        for i, value in enumerate(self.gain_options):
+            if gain_value >= value:
+                result = self.driver.SetPreAmpGain(i)
+                assert(self.SUCCESS == result), f"unable to set detector gain, got value of {res}"
+                log.debug(f"for {gain_value} setting gain to {self.gain_options[i]}")
+                return
+        result = self.driver.SetPreAmpGain(0)
+        assert(self.SUCCESS == result), f"unable to set detector gain, got value of {res}"
 
-
-    def set_detector_gain(self):
-        gain_low = c_int(self.detector_gain)
-        gain_high = c_int()
-        res = self.driver.GetMCPGain(byref(gain_low)) 
-        assert(self.SUCCESS == res), f"unable to set detector gain, got value of {res}"
-        log.debug(f"got detector gain range of {gain_low} to {gain_high}")
 
     def acquire_data(self):
         reading = self.take_one_averaged_reading()
@@ -208,9 +211,6 @@ class AndorDevice:
                         log.error(f"unable to read tec temp, result was {temp_success}")
                     else:
                         log.debug(f"andor read temperature, value of {temperature.value}")
-
-                if self.update_gain:
-                    self.set_detector_gain()
 
                 reading.detector_temperature_degC = temperature.value
             except usb.USBError:
@@ -405,6 +405,20 @@ class AndorDevice:
         self.config_values['wavelength_coeffs'] = coeffs
         f = open(self.config_file, 'w')
         json.dump(self.config_values, f)
+
+    def obtain_gain_info(self):
+        num_gains = c_int()
+        result = self.driver.GetNumberPreAmpGains(byref(num_gains))
+        assert(self.SUCCESS == result), f"unable to get number of gains. Got result {result}"
+        log.debug(f"got number of gains is {num_gains.value}")
+        self.gain_options = []
+        spec_gain_opt = c_float()
+        for i in range(num_gains.value):
+            result = self.driver.GetPreAmpGain(i, byref(spec_gain_opt))
+            assert(self.SUCCESS == result), f"unable to get gains index {i}. Got result {result}"
+            self.gain_options.append(spec_gain_opt.value)
+        self.gain_options.sort(reverse=True)
+        log.debug(f"obtained gain options for spec, values were {self.gain_options}")
 
     def get_default_data_dir(self):
         if os.name == "nt":
