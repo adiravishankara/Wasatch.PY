@@ -152,7 +152,7 @@ class AndorDevice:
         # set to that gain, idea being set to closest gain floor
         for i, value in enumerate(self.gain_options):
             if gain_value >= value:
-                result = self.driver.SetPreAmpGain(i)
+                result = self.driver.SetPreAmpGain(self.gain_idx[i])
                 assert(self.SUCCESS == result), f"unable to set detector gain, got value of {res}"
                 log.debug(f"for {gain_value} setting gain to {self.gain_options[i]}")
                 return
@@ -412,12 +412,15 @@ class AndorDevice:
         assert(self.SUCCESS == result), f"unable to get number of gains. Got result {result}"
         log.debug(f"got number of gains is {num_gains.value}")
         self.gain_options = []
+        self.gain_idx = []
         spec_gain_opt = c_float()
         for i in range(num_gains.value):
             result = self.driver.GetPreAmpGain(i, byref(spec_gain_opt))
             assert(self.SUCCESS == result), f"unable to get gains index {i}. Got result {result}"
             self.gain_options.append(spec_gain_opt.value)
-        self.gain_options.sort(reverse=True)
+            self.gain_idx.append(i)
+        self.gain_idx = self.gain_idx[::-1]
+        self.gain_options = self.gain_options[::-1]
         log.debug(f"obtained gain options for spec, values were {self.gain_options}")
 
     def get_default_data_dir(self):
